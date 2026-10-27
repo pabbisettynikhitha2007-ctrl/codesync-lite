@@ -1,9 +1,14 @@
 require("dotenv").config();
+
+// Fix: Node 18+ defaults to IPv6 DNS which breaks MongoDB Atlas SRV records on Windows
+const dns = require("dns");
+dns.setDefaultResultOrder("ipv4first");
+
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const mongoose = require("mongoose");
-const { Server } = require("socket.io");
+const { initSocket } = require("./socket");
 
 const app = express();
 app.use(cors());
@@ -21,8 +26,7 @@ app.use((err, req, res, next) => {
 });
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
-require("./socket")(io);
+initSocket(server);
 
 const PORT = process.env.PORT || 5000;
 mongoose

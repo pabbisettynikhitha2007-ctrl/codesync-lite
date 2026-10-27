@@ -6,9 +6,8 @@ const SERVER_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 // One shared connection for the whole app. CodeEditor connects it on mount.
 export const socket = io(SERVER_URL, { autoConnect: false });
 
-// Agreement with Person 1: Home.jsx saves the entered name with
-//   localStorage.setItem('codesync_name', name)
-export const getName = () => localStorage.getItem('codesync_name') || 'Guest';
+// Checks both 'name' (from Person 1's Home.jsx) and 'codesync_name'
+export const getName = () => localStorage.getItem('name') || localStorage.getItem('codesync_name') || 'Guest';
 
 export function joinRoom(roomId) {
   socket.emit('join-room', { roomId, name: getName() });

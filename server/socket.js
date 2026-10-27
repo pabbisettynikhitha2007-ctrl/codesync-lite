@@ -1,11 +1,4 @@
 // server/socket.js  (Person 2)
-// Usage in server/index.js (Person 3):
-//   const http = require('http');
-//   const { initSocket } = require('./socket');
-//   const server = http.createServer(app);
-//   initSocket(server);
-//   server.listen(PORT);
-
 const { Server } = require('socket.io');
 
 const LANGUAGES = ['javascript', 'python', 'java', 'cpp'];
@@ -35,16 +28,24 @@ function getRoomState(roomId) {
   return { code: room.code, language: room.language, users: userNames(room) };
 }
 
-function initSocket(server) {
-  const io = new Server(server, {
-  cors: {
-    origin: [
-      process.env.CLIENT_URL || 'http://localhost:5173',
-      'http://localhost:5174',
-    ],
-    methods: ['GET', 'POST'],
-  },
-});
+function initSocket(serverOrIo) {
+  let io;
+  if (serverOrIo && typeof serverOrIo.on === 'function') {
+    // Already a Socket.IO Server instance
+    io = serverOrIo;
+  } else {
+    // HTTP server passed
+    io = new Server(serverOrIo, {
+      cors: {
+        origin: [
+          process.env.CLIENT_URL || 'http://localhost:5173',
+          'http://localhost:5174',
+          '*',
+        ],
+        methods: ['GET', 'POST'],
+      },
+    });
+  }
 
   io.on('connection', (socket) => {
     // join-room { roomId, name }
@@ -72,7 +73,7 @@ function initSocket(server) {
       });
     });
 
-    // code-change { roomId, code }
+    // code-change { code }
     socket.on('code-change', ({ code } = {}) => {
       const roomId = socket.data.roomId;
       if (!roomId || typeof code !== 'string') return;
@@ -80,7 +81,7 @@ function initSocket(server) {
       socket.to(roomId).emit('code-change', { code });
     });
 
-    // language-change { roomId, language }
+    // language-change { language }
     socket.on('language-change', ({ language } = {}) => {
       const roomId = socket.data.roomId;
       if (!roomId || !LANGUAGES.includes(language)) return;
@@ -88,7 +89,7 @@ function initSocket(server) {
       socket.to(roomId).emit('language-change', { language });
     });
 
-    // run-result { roomId, output }
+    // run-result { output }
     // The client calls POST /api/execute first, then emits this so the
     // other person sees the same output.
     socket.on('run-result', ({ output } = {}) => {
@@ -115,4 +116,6 @@ function initSocket(server) {
   return io;
 }
 
-module.exports = { initSocket, getRoomState };
+module.exports = initSocket;
+module.exports.initSocket = initSocket;
+module.exports.getRoomState = getRoomState;
