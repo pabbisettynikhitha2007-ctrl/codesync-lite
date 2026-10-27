@@ -132,7 +132,7 @@ export default function FeedbackForm({ roomId }) {
 }
 
 const styles = {
-  box: { background: '#1e2130', borderRadius: '10px', padding: '1.5rem', color: '#fff' },
+  box: { background: 'transparent', padding: '0.5rem 0', color: '#fff' },
   title: { margin: '0 0 1.25rem', fontSize: '1.1rem' },
   form: { display: 'flex', flexDirection: 'column', gap: '1rem' },
   field: { display: 'flex', flexDirection: 'column', gap: '0.4rem' },

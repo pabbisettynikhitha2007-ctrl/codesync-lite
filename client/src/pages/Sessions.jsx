@@ -1,148 +1,63 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { API_URL } from '../config';
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { API_URL } from "../config";
+import { PlusIcon, FlagIcon } from "../icons";
+
+const level = (n) => (n >= 4 ? "high" : n >= 3 ? "mid" : "low");
 
 export default function Sessions() {
-  const [feedbackList, setFeedbackList] = useState([]);
+  const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const navigate = useNavigate();
+  const [error, setError] = useState("");
 
   useEffect(() => {
     fetch(`${API_URL}/api/feedback`)
-      .then((res) => {
-        if (!res.ok) throw new Error('Failed to fetch sessions feedback');
-        return res.json();
-      })
-      .then((data) => {
-        setFeedbackList(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
+      .then((r) => r.json())
+      .then((d) => setRows(Array.isArray(d) ? d : d.feedback || []))
+      .catch(() => setError("Could not load sessions. Is the server running?"))
+      .finally(() => setLoading(false));
   }, []);
 
   return (
-    <div style={styles.page}>
-      <div style={styles.container}>
-        <div style={styles.header}>
-          <h1 style={styles.title}>📋 Interview Sessions & Feedback</h1>
-          <button style={styles.backBtn} onClick={() => navigate('/')}>
-            ← Back to Home
-          </button>
+    <main className="page">
+      <div className="page-head">
+        <div>
+          <h1>Your Coding Sessions</h1>
+          <p>Feedback and ratings from your completed interviews.</p>
         </div>
-
-        {loading && <p style={styles.status}>Loading past sessions...</p>}
-        {error && <p style={{ ...styles.status, color: '#f87171' }}>{error}</p>}
-
-        {!loading && !error && feedbackList.length === 0 && (
-          <p style={styles.status}>No interview feedback recorded yet.</p>
-        )}
-
-        {!loading && feedbackList.length > 0 && (
-          <div style={styles.tableWrapper}>
-            <table style={styles.table}>
-              <thead>
-                <tr style={styles.theadRow}>
-                  <th style={styles.th}>Room</th>
-                  <th style={styles.th}>Candidate</th>
-                  <th style={styles.th}>Problem Solving</th>
-                  <th style={styles.th}>Communication</th>
-                  <th style={styles.th}>Code Quality</th>
-                  <th style={styles.th}>Comments</th>
-                  <th style={styles.th}>Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {feedbackList.map((item) => (
-                  <tr key={item._id} style={styles.tr}>
-                    <td style={styles.td}>
-                      <code style={styles.code}>{item.roomId}</code>
-                    </td>
-                    <td style={styles.td}>{item.candidateName}</td>
-                    <td style={styles.td}>⭐ {item.problemSolving}/5</td>
-                    <td style={styles.td}>⭐ {item.communication}/5</td>
-                    <td style={styles.td}>⭐ {item.codeQuality}/5</td>
-                    <td style={styles.td}>{item.comments || '—'}</td>
-                    <td style={styles.td}>
-                      {new Date(item.createdAt).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <Link to="/#start" className="btn primary"><PlusIcon width={17} height={17} /> Create New Room</Link>
       </div>
-    </div>
+
+      {loading && <div className="spinner" />}
+      {error && <p className="error">{error}</p>}
+
+      {!loading && !error && rows.length === 0 && (
+        <div className="glass empty-state">
+          <div className="card-icon"><FlagIcon width={26} height={26} /></div>
+          <h2>No sessions yet</h2>
+          <p>Finish an interview and save feedback, and it will show up here.</p>
+          <Link to="/#start" className="btn primary">Create New Room</Link>
+        </div>
+      )}
+
+      {!loading && !error && rows.length > 0 && (
+        <div className="session-grid">
+          {rows.map((r) => (
+            <article className="glass session-card" key={r._id}>
+              <div className="session-top">
+                <h3>{r.candidateName}</h3>
+                <span className="mono">{r.roomId}</span>
+              </div>
+              <div className="scores">
+                <div className={`score-box ${level(r.problemSolving)}`}><small>Solving</small><b>{r.problemSolving}/5</b></div>
+                <div className={`score-box ${level(r.communication)}`}><small>Comms</small><b>{r.communication}/5</b></div>
+                <div className={`score-box ${level(r.codeQuality)}`}><small>Quality</small><b>{r.codeQuality}/5</b></div>
+              </div>
+              {r.comments && <p className="comment">{r.comments}</p>}
+            </article>
+          ))}
+        </div>
+      )}
+    </main>
   );
 }
-
-const styles = {
-  page: {
-    minHeight: '100vh',
-    background: '#0f1117',
-    color: '#fff',
-    padding: '2rem',
-    fontFamily: 'Inter, system-ui, sans-serif',
-  },
-  container: {
-    maxWidth: '1000px',
-    margin: '0 auto',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '2rem',
-  },
-  title: { margin: 0, fontSize: '1.6rem' },
-  backBtn: {
-    padding: '0.6rem 1.2rem',
-    background: '#2e3247',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontWeight: 'bold',
-  },
-  status: { color: '#9ca3af', textAlign: 'center', marginTop: '3rem' },
-  tableWrapper: {
-    overflowX: 'auto',
-    background: '#1a1d29',
-    borderRadius: '8px',
-    border: '1px solid #2e3247',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    textAlign: 'left',
-  },
-  theadRow: {
-    borderBottom: '1px solid #2e3247',
-    background: '#12141f',
-  },
-  th: {
-    padding: '0.8rem 1rem',
-    fontSize: '0.85rem',
-    color: '#9ca3af',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-  },
-  tr: {
-    borderBottom: '1px solid #2e3247',
-  },
-  td: {
-    padding: '0.8rem 1rem',
-    fontSize: '0.9rem',
-    color: '#e5e7eb',
-  },
-  code: {
-    background: '#12141f',
-    padding: '0.2rem 0.4rem',
-    borderRadius: '4px',
-    color: '#5865f2',
-  },
-};

@@ -1,74 +1,146 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { API_URL } from '../config'
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { API_URL } from "../config";
+import { CodeIcon, UsersIcon, BriefcaseIcon, LinkIcon, PlusIcon, ArrowIcon } from "../icons";
 
 export default function Home() {
-  const [roomId, setRoomId] = useState('')
-  const [username, setUsername] = useState('')
-  const [loading, setLoading] = useState(false)
-  const navigate = useNavigate()
+  const [name, setName] = useState(localStorage.getItem("name") || "");
+  const [joinId, setJoinId] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const navigate = useNavigate();
 
-  const join = async (e) => {
-    e.preventDefault()
-    const user = username.trim() || 'Anonymous'
-    localStorage.setItem('codesync_name', user)
-
-    let targetRoom = roomId.trim()
-    if (!targetRoom) {
-      setLoading(true)
-      try {
-        const res = await fetch(`${API_URL}/api/rooms`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: user }),
-        })
-        const data = await res.json()
-        targetRoom = data.roomId || crypto.randomUUID().slice(0, 8)
-      } catch {
-        targetRoom = crypto.randomUUID().slice(0, 8)
-      } finally {
-        setLoading(false)
-      }
+  const createRoom = async () => {
+    if (!name.trim()) return setError("Please enter your name");
+    setLoading(true); setError("");
+    try {
+      const res = await fetch(`${API_URL}/api/rooms`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error();
+      const { roomId } = await res.json();
+      localStorage.setItem("name", name);
+      localStorage.setItem("role", "interviewer");
+      navigate(`/room/${roomId}`);
+    } catch {
+      setError("Could not create room. Is the server running?");
     }
+    setLoading(false);
+  };
 
-    navigate(`/room/${targetRoom}`, { state: { username: user } })
-  }
+  const joinRoom = () => {
+    if (!name.trim() || !joinId.trim()) return setError("Enter your name and room ID");
+    localStorage.setItem("name", name);
+    localStorage.setItem("role", "candidate");
+    navigate(`/room/${joinId.trim()}`);
+  };
 
   return (
-    <div style={styles.page}>
-      <div style={styles.card}>
-        <h1 style={styles.title}>⚡ CodeSync Lite</h1>
-        <p style={styles.subtitle}>Real-time collaborative code editor</p>
-        <form onSubmit={join} style={styles.form}>
-          <input
-            style={styles.input}
-            placeholder="Your name"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-          />
-          <input
-            style={styles.input}
-            placeholder="Room ID (leave blank to create new)"
-            value={roomId}
-            onChange={(e) => setRoomId(e.target.value)}
-          />
-          <button style={styles.btn} type="submit" disabled={loading}>
-            {loading ? 'Creating Room...' : 'Join / Create Room →'}
-          </button>
-        </form>
-        <a href="/sessions" style={styles.link}>View saved sessions</a>
-      </div>
-    </div>
-  )
-}
+    <>
+      <main className="container hero">
+        <div className="hero-grid">
+          <div className="fade-in">
+            <span className="eyebrow"><span className="pulse" /> Built for interviews &amp; pair programming</span>
+            <h1>Code Together.<br /><span className="gradient-text">Solve Together.</span></h1>
+            <p className="lead">
+              The collaborative coding workspace built for interviews, pair programming, and real-time problem solving.
+            </p>
+            <div className="cta-row">
+              <a href="#start" className="btn primary lg">Start Coding <ArrowIcon width={18} height={18} /></a>
+              <a href="#features" className="btn outline lg">Explore Features</a>
+            </div>
+            <p className="trust">Real-time collaboration • Shared coding workspace • Interview-ready</p>
 
-const styles = {
-  page: { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', background: '#0f1117' },
-  card: { background: '#1e2130', padding: '2.5rem', borderRadius: '12px', width: '100%', maxWidth: '420px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' },
-  title: { margin: 0, color: '#fff', fontSize: '2rem' },
-  subtitle: { color: '#8b8fa8', marginTop: '0.4rem' },
-  form: { display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1.5rem' },
-  input: { padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid #2e3247', background: '#12141f', color: '#fff', fontSize: '1rem', outline: 'none' },
-  btn: { padding: '0.85rem', borderRadius: '8px', background: '#5865f2', color: '#fff', border: 'none', fontSize: '1rem', cursor: 'pointer', fontWeight: 600 },
-  link: { display: 'block', marginTop: '1.25rem', color: '#8b8fa8', textAlign: 'center', fontSize: '0.9rem' },
+            {/* Decorative preview only: sample data, not real users */}
+            <div className="glass preview" aria-hidden="true">
+              <div className="preview-bar">
+                <div className="dots"><i /><i /><i /></div>
+                <span className="grow">solution.js</span>
+                <span className="mini-badge live">● Live session</span>
+              </div>
+              <pre>
+<span className="c">// sample preview</span>{"\n"}
+<span className="k">function</span> <span className="f">twoSum</span>(nums, target) {"{"}{"\n"}
+{"  "}<span className="k">const</span> seen = <span className="k">new</span> <span className="f">Map</span>();<span className="cursor a" />{"\n"}
+{"  "}<span className="k">for</span> (<span className="k">let</span> i = <span className="n">0</span>; i &lt; nums.length; i++) {"{"}{"\n"}
+{"    "}<span className="k">const</span> need = target - nums[i];<span className="cursor b" />{"\n"}
+{"    "}<span className="k">if</span> (seen.<span className="f">has</span>(need)) <span className="k">return</span> [seen.<span className="f">get</span>(need), i];{"\n"}
+{"    "}seen.<span className="f">set</span>(nums[i], i);{"\n"}
+{"  }"}{"\n"}
+{"}"}
+              </pre>
+              <div className="avatars">
+                <span className="av a">A</span><span className="av b">B</span><span className="av c">C</span>
+                <span className="txt">3 developers online</span>
+                <span className="mini-badge" style={{ marginLeft: "auto" }}>Demo preview</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="fade-in d2" id="start">
+            <div className="glass room-card">
+              <div className="card-icon"><CodeIcon width={22} height={22} /></div>
+              <h2>Your next coding session starts here.</h2>
+              <p className="muted">Create a private workspace or join your team instantly.</p>
+
+              <label className="field-label" htmlFor="name">Your Name</label>
+              <input id="name" placeholder="Enter your display name" value={name}
+                onChange={(e) => setName(e.target.value)} />
+              <button className="btn primary block" onClick={createRoom} disabled={loading}>
+                <PlusIcon width={17} height={17} /> {loading ? "Creating..." : "Create New Room"}
+              </button>
+
+              <div className="divider">or join an existing room</div>
+
+              <label className="field-label" htmlFor="rid">Room ID</label>
+              <input id="rid" placeholder="Paste your room ID" value={joinId}
+                onChange={(e) => setJoinId(e.target.value)} />
+              <button className="btn block" onClick={joinRoom}>Join Workspace</button>
+              {error && <p className="error">{error}</p>}
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <section className="section container" id="features">
+        <div className="section-head">
+          <h2>Everything you need to <span className="gradient-text">code together</span></h2>
+          <p>A focused workspace without the clutter.</p>
+        </div>
+        <div className="grid-3">
+          <div className="glass feature">
+            <div className="ico"><UsersIcon /></div>
+            <h3>Real-Time Collaboration</h3>
+            <p>Write and edit code together in a shared workspace.</p>
+          </div>
+          <div className="glass feature">
+            <div className="ico"><BriefcaseIcon /></div>
+            <h3>Interview Workspace</h3>
+            <p>Practice technical interviews and solve coding challenges with your teammates.</p>
+          </div>
+          <div className="glass feature">
+            <div className="ico"><LinkIcon /></div>
+            <h3>Instant Room Sharing</h3>
+            <p>Create a room and invite others using a simple room ID.</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="section container" id="how">
+        <div className="section-head">
+          <h2>How it works</h2>
+          <p>From zero to coding in three steps.</p>
+        </div>
+        <div className="grid-3">
+          <div className="glass feature"><span className="step-num">01</span><h3>Create a room</h3><p>Enter your name and start a new workspace.</p></div>
+          <div className="glass feature"><span className="step-num">02</span><h3>Share the link</h3><p>Send the link or room ID to your teammate or candidate.</p></div>
+          <div className="glass feature"><span className="step-num">03</span><h3>Code and review</h3><p>Edit together, run code, then save feedback when you finish.</p></div>
+        </div>
+      </section>
+
+      <footer className="footer">CodeSync Lite · Real-time collaborative coding</footer>
+    </>
+  );
 }

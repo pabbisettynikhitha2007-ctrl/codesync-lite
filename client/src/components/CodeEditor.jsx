@@ -1,12 +1,11 @@
 // client/src/components/CodeEditor.jsx  (Person 2)
-// Props (agreed contract): <CodeEditor roomId={roomId} language={language} onLanguageChange={fn} />
-// The parent must give this component a height (e.g. a flex child or height: 100%).
+// Props (agreed contract): <CodeEditor roomId={roomId} language={language} onLanguageChange={fn} onCodeChange={fn} />
 
 import { useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import { socket, joinRoom } from '../socket';
 
-export default function CodeEditor({ roomId, language, onLanguageChange }) {
+export default function CodeEditor({ roomId, language, onLanguageChange, onCodeChange }) {
   const editorRef = useRef(null);
   const codeRef = useRef('');          // latest code known (covers Monaco still loading)
   const isRemote = useRef(false);      // true while we apply someone else's change
@@ -14,11 +13,14 @@ export default function CodeEditor({ roomId, language, onLanguageChange }) {
   const langRef = useRef(language);    // last language known to match the room
   const onLangRef = useRef(onLanguageChange);
   onLangRef.current = onLanguageChange;
+  const onCodeRef = useRef(onCodeChange);
+  onCodeRef.current = onCodeChange;
 
   // Put remote code into the editor without triggering an emit (echo loop guard)
   const applyCode = (value) => {
     codeRef.current = value;
     window.__CODESYNC_LATEST_CODE__ = value;
+    onCodeRef.current?.(value);
     const editor = editorRef.current;
     if (!editor || editor.getValue() === value) return;
 
@@ -77,12 +79,15 @@ export default function CodeEditor({ roomId, language, onLanguageChange }) {
     if (codeRef.current) {
       applyCode(codeRef.current); // room-state arrived before Monaco loaded
     } else {
-      window.__CODESYNC_LATEST_CODE__ = editor.getValue() || '';
+      const val = editor.getValue() || '';
+      window.__CODESYNC_LATEST_CODE__ = val;
+      onCodeRef.current?.(val);
     }
   };
 
   const handleChange = (value) => {
     window.__CODESYNC_LATEST_CODE__ = value ?? '';
+    onCodeRef.current?.(value ?? '');
     if (isRemote.current) return; // change came from the network, don't echo it
     codeRef.current = value ?? '';
     clearTimeout(emitTimer.current);
