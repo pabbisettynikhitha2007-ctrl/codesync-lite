@@ -1,146 +1,291 @@
-import { useEffect, useRef, useState } from 'react'
-import { useParams, useLocation, useNavigate } from 'react-router-dom'
-import { socket } from '../socket'
-import CodeEditor from '../components/CodeEditor'
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import CodeEditor from '../components/CodeEditor';
+import VideoCall from '../components/VideoCall';
+import FeedbackForm from '../components/FeedbackForm';
+import { API_URL } from '../config';
+import { onRunResult, sendRunResult, onPresence } from '../socket';
 
-const LANGUAGES = ['javascript', 'python', 'java', 'cpp']
+const LANGUAGES = ['javascript', 'python', 'java', 'cpp'];
 
 export default function Room() {
-  const { roomId } = useParams()
-  const { state } = useLocation()
-  const navigate = useNavigate()
-  const username = state?.username || 'Anonymous'
+  const { roomId } = useParams();
+  const navigate = useNavigate();
 
-  const [code, setCode] = useState('// Start coding here...')
-  const [language, setLanguage] = useState('javascript')
-  const [output, setOutput] = useState('')
-  const [users, setUsers] = useState([])
-  const [running, setRunning] = useState(false)
-  const suppressRef = useRef(false)   // avoid echo-back loops
+  const [language, setLanguage] = useState('javascript');
+  const [output, setOutput] = useState('');
+  const [running, setRunning] = useState(false);
+  const [users, setUsers] = useState([]);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  // ── Socket setup ─────────────────────────────────────────────────────────
+  // Sync run results & users with remote room peers
   useEffect(() => {
-    socket.connect()
-    socket.emit('join-room', { roomId, username })
-
-    socket.on('room-users', setUsers)
-    socket.on('user-joined', ({ username: u }) => setOutput((o) => `${o}\n💬 ${u} joined`))
-    socket.on('user-left', ({ username: u }) => setOutput((o) => `${o}\n💬 ${u} left`))
-
-    socket.on('code-update', ({ code: incoming }) => {
-      suppressRef.current = true
-      setCode(incoming)
-    })
-
-    socket.on('language-update', ({ lang }) => setLanguage(lang))
+    const unsubRun = onRunResult((out) => setOutput(out));
+    const unsubPres = onPresence((userList) => setUsers(userList || []));
 
     return () => {
-      socket.emit('leave-room', { roomId, username })
-      socket.disconnect()
-      socket.off('room-users')
-      socket.off('user-joined')
-      socket.off('user-left')
-      socket.off('code-update')
-      socket.off('language-update')
-    }
-  }, [roomId, username])
+      unsubRun?.();
+      unsubPres?.();
+    };
+  }, []);
 
-  // ── Code change handler ───────────────────────────────────────────────────
-  const handleCodeChange = (newCode) => {
-    setCode(newCode)
-    if (suppressRef.current) { suppressRef.current = false; return }
-    socket.emit('code-change', { roomId, code: newCode })
-  }
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(window.location.href);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
-  const handleLanguageChange = (lang) => {
-    setLanguage(lang)
-    socket.emit('language-change', { roomId, lang })
-  }
-
-  // ── Run code ──────────────────────────────────────────────────────────────
   const runCode = async () => {
-    setRunning(true)
-    setOutput('⏳ Running...')
+    setRunning(true);
+    setOutput('⏳ Running...');
     try {
-      const res = await fetch('http://localhost:5000/api/execute', {
+      // Fetch latest code from Monaco if available via window or fallback
+      const editorElement = document.querySelector('.monaco-editor');
+      // Execute through backend
+      const res = await fetch(`${API_URL}/api/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, language }),
-      })
-      const data = await res.json()
-      setOutput(data.output || data.error || '(no output)')
+        body: JSON.stringify({
+          code: window.__CODESYNC_LATEST_CODE__ || '// No code found',
+          language,
+        }),
+      });
+      const data = await res.json();
+      const out = data.output || data.error || '(no output)';
+      setOutput(out);
+      sendRunResult(roomId, out);
     } catch {
-      setOutput('❌ Failed to connect to server')
+      const errOut = '❌ Failed to connect to execution server';
+      setOutput(errOut);
+      sendRunResult(roomId, errOut);
     } finally {
-      setRunning(false)
+      setRunning(false);
     }
-  }
+  };
 
   return (
     <div style={styles.page}>
-      {/* Sidebar */}
-      <aside style={styles.sidebar}>
-        <h2 style={styles.logo}>⚡ CodeSync</h2>
-        <p style={styles.roomLabel}>Room: <code style={styles.roomId}>{roomId}</code></p>
-        <hr style={styles.divider} />
-        <p style={styles.sectionLabel}>Participants ({users.length})</p>
-        <ul style={styles.userList}>
-          {users.map((u) => (
-            <li key={u.id} style={styles.userItem}>
-              <span style={styles.dot} /> {u.username} {u.id === socket.id ? '(you)' : ''}
-            </li>
-          ))}
-        </ul>
-        <div style={{ flex: 1 }} />
-        <button style={styles.leaveBtn} onClick={() => navigate('/')}>← Leave</button>
-      </aside>
-
-      {/* Main */}
-      <main style={styles.main}>
-        {/* Toolbar */}
-        <div style={styles.toolbar}>
-          <select
-            style={styles.select}
-            value={language}
-            onChange={(e) => handleLanguageChange(e.target.value)}
-          >
-            {LANGUAGES.map((l) => <option key={l} value={l}>{l}</option>)}
-          </select>
-          <button style={styles.runBtn} onClick={runCode} disabled={running}>
-            {running ? '⏳ Running…' : '▶ Run'}
+      {/* Top Bar */}
+      <header style={styles.topbar}>
+        <div style={styles.logoGroup}>
+          <span style={styles.logo}>⚡ CodeSync Lite</span>
+          <span style={styles.roomTag}>Room: <strong>{roomId}</strong></span>
+          <button style={styles.copyBtn} onClick={handleCopyLink}>
+            {copied ? '✓ Copied!' : '📋 Copy Link'}
           </button>
         </div>
 
-        {/* Editor */}
-        <CodeEditor code={code} language={language} onChange={handleCodeChange} />
+        <div style={styles.controlsGroup}>
+          <select
+            style={styles.select}
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+          >
+            {LANGUAGES.map((l) => (
+              <option key={l} value={l}>
+                {l.toUpperCase()}
+              </option>
+            ))}
+          </select>
 
-        {/* Output */}
-        <div style={styles.outputBox}>
-          <p style={styles.outputLabel}>Output</p>
-          <pre style={styles.output}>{output || '— run your code to see output —'}</pre>
+          <button style={styles.runBtn} onClick={runCode} disabled={running}>
+            {running ? '⏳ Running...' : '▶ Run Code'}
+          </button>
+
+          <button
+            style={styles.finishBtn}
+            onClick={() => setShowFeedback((prev) => !prev)}
+          >
+            {showFeedback ? 'Hide Feedback' : 'Finish & Rate'}
+          </button>
+
+          <button style={styles.leaveBtn} onClick={() => navigate('/')}>
+            Leave
+          </button>
         </div>
-      </main>
+      </header>
+
+      {/* Main Content Area */}
+      <div style={styles.content}>
+        {/* Left Column: Monaco Code Editor */}
+        <div style={styles.editorPane}>
+          <CodeEditor
+            roomId={roomId}
+            language={language}
+            onLanguageChange={setLanguage}
+          />
+        </div>
+
+        {/* Right Column: Video Call & Feedback */}
+        <div style={styles.sidePane}>
+          <div style={styles.videoBox}>
+            <VideoCall roomId={roomId} />
+          </div>
+
+          {showFeedback ? (
+            <div style={styles.feedbackContainer}>
+              <FeedbackForm roomId={roomId} />
+            </div>
+          ) : (
+            <div style={styles.participantsBox}>
+              <h4 style={styles.sideHeader}>Connected Users ({users.length})</h4>
+              <ul style={styles.userList}>
+                {users.map((u, i) => (
+                  <li key={i} style={styles.userItem}>
+                    🟢 {typeof u === 'string' ? u : u.name || 'User'}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Bottom Output Panel */}
+      <footer style={styles.outputPane}>
+        <div style={styles.outputHeader}>Output Console</div>
+        <pre style={styles.outputContent}>{output || 'Click "▶ Run Code" to execute.'}</pre>
+      </footer>
     </div>
-  )
+  );
 }
 
 const styles = {
-  page: { display: 'flex', height: '100vh', background: '#0f1117', color: '#fff', fontFamily: 'sans-serif' },
-  sidebar: { width: '220px', background: '#1e2130', display: 'flex', flexDirection: 'column', padding: '1.25rem', gap: '0.5rem', flexShrink: 0 },
-  logo: { margin: 0, fontSize: '1.3rem' },
-  roomLabel: { fontSize: '0.8rem', color: '#8b8fa8', margin: 0 },
-  roomId: { color: '#5865f2' },
-  divider: { border: 'none', borderTop: '1px solid #2e3247', margin: '0.5rem 0' },
-  sectionLabel: { fontSize: '0.75rem', color: '#8b8fa8', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 },
-  userList: { listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem' },
-  userItem: { fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.4rem' },
-  dot: { width: 8, height: 8, borderRadius: '50%', background: '#57f287', flexShrink: 0 },
-  leaveBtn: { padding: '0.6rem', borderRadius: '8px', border: 'none', background: '#2e3247', color: '#fff', cursor: 'pointer', fontSize: '0.9rem' },
-  main: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-  toolbar: { display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', background: '#1e2130', borderBottom: '1px solid #2e3247' },
-  select: { padding: '0.4rem 0.75rem', borderRadius: '6px', background: '#12141f', border: '1px solid #2e3247', color: '#fff', fontSize: '0.9rem' },
-  runBtn: { padding: '0.4rem 1rem', borderRadius: '6px', background: '#57f287', color: '#000', border: 'none', fontWeight: 700, cursor: 'pointer', fontSize: '0.9rem' },
-  outputBox: { background: '#12141f', borderTop: '1px solid #2e3247', padding: '0.75rem 1rem', maxHeight: '200px', overflowY: 'auto', flexShrink: 0 },
-  outputLabel: { margin: '0 0 0.4rem', fontSize: '0.75rem', color: '#8b8fa8', textTransform: 'uppercase' },
-  output: { margin: 0, fontSize: '0.9rem', color: '#a9b1d6', whiteSpace: 'pre-wrap' },
-}
+  page: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100vh',
+    background: '#0f1117',
+    color: '#fff',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    overflow: 'hidden',
+  },
+  topbar: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '0.6rem 1.2rem',
+    background: '#1a1d29',
+    borderBottom: '1px solid #2e3247',
+    zIndex: 10,
+  },
+  logoGroup: { display: 'flex', alignItems: 'center', gap: '0.8rem' },
+  logo: { fontSize: '1.1rem', fontWeight: 'bold', color: '#5865f2' },
+  roomTag: { background: '#12141f', padding: '0.3rem 0.6rem', borderRadius: '4px', fontSize: '0.85rem' },
+  copyBtn: {
+    padding: '0.3rem 0.6rem',
+    fontSize: '0.8rem',
+    borderRadius: '4px',
+    border: '1px solid #3e445b',
+    background: '#232636',
+    color: '#d1d5db',
+    cursor: 'pointer',
+  },
+  controlsGroup: { display: 'flex', alignItems: 'center', gap: '0.6rem' },
+  select: {
+    padding: '0.4rem 0.8rem',
+    borderRadius: '6px',
+    background: '#12141f',
+    border: '1px solid #2e3247',
+    color: '#fff',
+    fontSize: '0.85rem',
+  },
+  runBtn: {
+    padding: '0.4rem 1rem',
+    borderRadius: '6px',
+    background: '#10b981',
+    color: '#fff',
+    border: 'none',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    fontSize: '0.85rem',
+  },
+  finishBtn: {
+    padding: '0.4rem 0.9rem',
+    borderRadius: '6px',
+    background: '#8b5cf6',
+    color: '#fff',
+    border: 'none',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    fontSize: '0.85rem',
+  },
+  leaveBtn: {
+    padding: '0.4rem 0.8rem',
+    borderRadius: '6px',
+    background: '#ef4444',
+    color: '#fff',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '0.85rem',
+  },
+  content: {
+    display: 'flex',
+    flex: 1,
+    overflow: 'hidden',
+  },
+  editorPane: {
+    flex: 6,
+    height: '100%',
+    position: 'relative',
+    borderRight: '1px solid #2e3247',
+  },
+  sidePane: {
+    flex: 4,
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    background: '#161922',
+    overflowY: 'auto',
+  },
+  videoBox: {
+    height: '280px',
+    padding: '0.75rem',
+  },
+  feedbackContainer: {
+    padding: '0.75rem',
+  },
+  participantsBox: {
+    padding: '1rem',
+  },
+  sideHeader: {
+    margin: '0 0 0.5rem 0',
+    fontSize: '0.9rem',
+    color: '#9ca3af',
+  },
+  userList: {
+    listStyle: 'none',
+    padding: 0,
+    margin: 0,
+  },
+  userItem: {
+    padding: '0.3rem 0',
+    fontSize: '0.85rem',
+    color: '#e5e7eb',
+  },
+  outputPane: {
+    height: '160px',
+    background: '#0a0c10',
+    borderTop: '1px solid #2e3247',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  outputHeader: {
+    padding: '0.3rem 0.8rem',
+    fontSize: '0.75rem',
+    background: '#161922',
+    color: '#9ca3af',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  },
+  outputContent: {
+    flex: 1,
+    margin: 0,
+    padding: '0.6rem 0.8rem',
+    fontSize: '0.85rem',
+    color: '#a3e635',
+    fontFamily: 'Consolas, monospace',
+    overflowY: 'auto',
+  },
+};

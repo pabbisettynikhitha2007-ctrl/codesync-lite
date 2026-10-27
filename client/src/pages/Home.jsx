@@ -1,16 +1,37 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { API_URL } from '../config'
 
 export default function Home() {
   const [roomId, setRoomId] = useState('')
   const [username, setUsername] = useState('')
+  const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
 
-  const join = (e) => {
+  const join = async (e) => {
     e.preventDefault()
-    const room = roomId.trim() || crypto.randomUUID().slice(0, 8)
     const user = username.trim() || 'Anonymous'
-    navigate(`/room/${room}`, { state: { username: user } })
+    localStorage.setItem('codesync_name', user)
+
+    let targetRoom = roomId.trim()
+    if (!targetRoom) {
+      setLoading(true)
+      try {
+        const res = await fetch(`${API_URL}/api/rooms`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: user }),
+        })
+        const data = await res.json()
+        targetRoom = data.roomId || crypto.randomUUID().slice(0, 8)
+      } catch {
+        targetRoom = crypto.randomUUID().slice(0, 8)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    navigate(`/room/${targetRoom}`, { state: { username: user } })
   }
 
   return (
@@ -31,8 +52,8 @@ export default function Home() {
             value={roomId}
             onChange={(e) => setRoomId(e.target.value)}
           />
-          <button style={styles.btn} type="submit">
-            Join / Create Room →
+          <button style={styles.btn} type="submit" disabled={loading}>
+            {loading ? 'Creating Room...' : 'Join / Create Room →'}
           </button>
         </form>
         <a href="/sessions" style={styles.link}>View saved sessions</a>

@@ -1,4 +1,9 @@
 require("dotenv").config();
+
+// Fix: Node 18+ defaults to IPv6 DNS which breaks MongoDB Atlas SRV records on Windows
+const dns = require("dns");
+dns.setDefaultResultOrder("ipv4first");
+
 const express = require("express");
 const http = require("http");
 const cors = require("cors");

@@ -1,101 +1,121 @@
-/**
- * Socket.IO event handlers for real-time collaboration.
- *
- * Events (client → server):
- *   join-room   { roomId, username }   – join a collaboration room
- *   code-change { roomId, code }       – broadcast code delta to room peers
- *   language-change { roomId, lang }   – broadcast language selection
- *   cursor-move { roomId, cursor }     – broadcast cursor position
- *   leave-room  { roomId, username }   – explicit leave (also fires on disconnect)
- *
- * Events (server → client):
- *   room-users  [{ id, username }]     – updated user list for the room
- *   user-joined { id, username }       – someone joined
- *   user-left   { id, username }       – someone left
- *   code-update { code }              – incoming code change
- *   language-update { lang }          – incoming language change
- *   cursor-update { cursor, id }      – incoming cursor position
- */
+// server/socket.js  (Person 2)
+const { Server } = require('socket.io');
 
-// roomId → Map<socketId, username>
+const LANGUAGES = ['javascript', 'python', 'java', 'cpp'];
+const EMPTY_ROOM_TTL = 30 * 60 * 1000; // keep an empty room's code for 30 min
+
+// roomId -> { code, language, users: Map<socketId, name>, cleanupTimer }
 const rooms = new Map();
 
-module.exports = (io) => {
-  io.on('connection', (socket) => {
-    console.log(`🔌  Socket connected: ${socket.id}`);
+function getRoom(roomId) {
+  if (!rooms.has(roomId)) {
+    rooms.set(roomId, {
+      code: '',
+      language: 'javascript',
+      users: new Map(),
+      cleanupTimer: null,
+    });
+  }
+  return rooms.get(roomId);
+}
 
-    // ── Join room ────────────────────────────────────────────────────────────
-    socket.on('join-room', ({ roomId, username }) => {
-      if (!roomId || !username) return;
+const userNames = (room) => [...room.users.values()];
+
+// Person 3 can call this from the "finish room" route to save finalCode.
+function getRoomState(roomId) {
+  const room = rooms.get(roomId);
+  if (!room) return null;
+  return { code: room.code, language: room.language, users: userNames(room) };
+}
+
+function initSocket(serverOrIo) {
+  let io;
+  if (serverOrIo && typeof serverOrIo.on === 'function') {
+    // Already a Socket.IO Server instance
+    io = serverOrIo;
+  } else {
+    // HTTP server passed
+    io = new Server(serverOrIo, {
+      cors: {
+        origin: [
+          process.env.CLIENT_URL || 'http://localhost:5173',
+          'http://localhost:5174',
+          '*',
+        ],
+        methods: ['GET', 'POST'],
+      },
+    });
+  }
+
+  io.on('connection', (socket) => {
+    // join-room { roomId, name }
+    socket.on('join-room', ({ roomId, name } = {}) => {
+      if (typeof roomId !== 'string' || !roomId) return;
+      const displayName = (name || 'Guest').toString().slice(0, 40);
+
+      const room = getRoom(roomId);
+      clearTimeout(room.cleanupTimer);
 
       socket.join(roomId);
+      socket.data.roomId = roomId; // trust this, not payloads, from now on
+      room.users.set(socket.id, displayName);
 
-      if (!rooms.has(roomId)) rooms.set(roomId, new Map());
-      rooms.get(roomId).set(socket.id, username);
+      // Late joiners get the current code + language right away
+      socket.emit('room-state', {
+        code: room.code,
+        language: room.language,
+        users: userNames(room),
+      });
 
-      const users = getUserList(roomId);
-
-      // Tell everyone in the room who joined
-      socket.to(roomId).emit('user-joined', { id: socket.id, username });
-
-      // Send the joining user the current user list
-      io.to(roomId).emit('room-users', users);
-
-      console.log(`👥  ${username} joined room ${roomId} (${users.length} users)`);
-
-      // Store on socket for cleanup on disconnect
-      socket.data.roomId = roomId;
-      socket.data.username = username;
+      socket.to(roomId).emit('user-joined', {
+        name: displayName,
+        users: userNames(room),
+      });
     });
 
-    // ── Code change ──────────────────────────────────────────────────────────
-    socket.on('code-change', ({ roomId, code }) => {
-      socket.to(roomId).emit('code-update', { code });
+    // code-change { code }
+    socket.on('code-change', ({ code } = {}) => {
+      const roomId = socket.data.roomId;
+      if (!roomId || typeof code !== 'string') return;
+      getRoom(roomId).code = code;
+      socket.to(roomId).emit('code-change', { code });
     });
 
-    // ── Language change ──────────────────────────────────────────────────────
-    socket.on('language-change', ({ roomId, lang }) => {
-      socket.to(roomId).emit('language-update', { lang });
+    // language-change { language }
+    socket.on('language-change', ({ language } = {}) => {
+      const roomId = socket.data.roomId;
+      if (!roomId || !LANGUAGES.includes(language)) return;
+      getRoom(roomId).language = language;
+      socket.to(roomId).emit('language-change', { language });
     });
 
-    // ── Cursor move ──────────────────────────────────────────────────────────
-    socket.on('cursor-move', ({ roomId, cursor }) => {
-      socket.to(roomId).emit('cursor-update', { cursor, id: socket.id });
+    // run-result { output }
+    // The client calls POST /api/execute first, then emits this so the
+    // other person sees the same output.
+    socket.on('run-result', ({ output } = {}) => {
+      const roomId = socket.data.roomId;
+      if (!roomId) return;
+      socket.to(roomId).emit('run-result', { output });
     });
 
-    // ── Explicit leave ───────────────────────────────────────────────────────
-    socket.on('leave-room', ({ roomId, username }) => {
-      handleLeave(socket, roomId, username);
-    });
-
-    // ── Disconnect ───────────────────────────────────────────────────────────
     socket.on('disconnect', () => {
-      const { roomId, username } = socket.data;
-      if (roomId) handleLeave(socket, roomId, username);
-      console.log(`❌  Socket disconnected: ${socket.id}`);
+      const roomId = socket.data.roomId;
+      const room = roomId && rooms.get(roomId);
+      if (!room) return;
+
+      const name = room.users.get(socket.id);
+      room.users.delete(socket.id);
+      socket.to(roomId).emit('user-left', { name, users: userNames(room) });
+
+      if (room.users.size === 0) {
+        room.cleanupTimer = setTimeout(() => rooms.delete(roomId), EMPTY_ROOM_TTL);
+      }
     });
   });
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
-  function getUserList(roomId) {
-    const room = rooms.get(roomId);
-    if (!room) return [];
-    return Array.from(room.entries()).map(([id, username]) => ({ id, username }));
-  }
+  return io;
+}
 
-  function handleLeave(socket, roomId, username) {
-    socket.leave(roomId);
-    const room = rooms.get(roomId);
-    if (room) {
-      room.delete(socket.id);
-      if (room.size === 0) rooms.delete(roomId);
-    }
-
-    const users = getUserList(roomId);
-    io.to(roomId).emit('user-left', { id: socket.id, username });
-    io.to(roomId).emit('room-users', users);
-
-    console.log(`👋  ${username} left room ${roomId} (${users.length} users remaining)`);
-  }
-};
-
+module.exports = initSocket;
+module.exports.initSocket = initSocket;
+module.exports.getRoomState = getRoomState;
