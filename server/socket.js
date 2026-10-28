@@ -1,10 +1,10 @@
-// server/socket.js  (Person 2)
+// server/socket.js
 const { Server } = require('socket.io');
 
 const LANGUAGES = ['javascript', 'python', 'java', 'cpp'];
 const EMPTY_ROOM_TTL = 30 * 60 * 1000; // keep an empty room's code for 30 min
 
-// roomId -> { code, language, users: Map<socketId, name>, cleanupTimer }
+// roomId -> { code, language, output, running, users: Map<socketId, name>, cleanupTimer }
 const rooms = new Map();
 
 function getRoom(roomId) {
@@ -12,6 +12,8 @@ function getRoom(roomId) {
     rooms.set(roomId, {
       code: '',
       language: 'javascript',
+      output: '',
+      running: false,
       users: new Map(),
       cleanupTimer: null,
     });
@@ -21,29 +23,30 @@ function getRoom(roomId) {
 
 const userNames = (room) => [...room.users.values()];
 
-// Person 3 can call this from the "finish room" route to save finalCode.
 function getRoomState(roomId) {
   const room = rooms.get(roomId);
   if (!room) return null;
-  return { code: room.code, language: room.language, users: userNames(room) };
+  return {
+    code: room.code,
+    language: room.language,
+    output: room.output,
+    running: room.running,
+    users: userNames(room),
+  };
 }
 
 function initSocket(serverOrIo) {
   let io;
   if (serverOrIo && typeof serverOrIo.on === 'function') {
-    // Already a Socket.IO Server instance
     io = serverOrIo;
   } else {
-    // HTTP server passed
     io = new Server(serverOrIo, {
       cors: {
-        origin: [
-          process.env.CLIENT_URL || 'http://localhost:5173',
-          'http://localhost:5174',
-          '*',
-        ],
+        origin: true, // Allow any origin (Vercel domains, preview URLs, localhost)
         methods: ['GET', 'POST'],
+        credentials: true,
       },
+      transports: ['websocket', 'polling'],
     });
   }
 
@@ -57,13 +60,16 @@ function initSocket(serverOrIo) {
       clearTimeout(room.cleanupTimer);
 
       socket.join(roomId);
-      socket.data.roomId = roomId; // trust this, not payloads, from now on
+      socket.data.roomId = roomId;
+      socket.data.username = displayName;
       room.users.set(socket.id, displayName);
 
-      // Late joiners get the current code + language right away
+      // Late joiners get the current code + language + output right away
       socket.emit('room-state', {
         code: room.code,
         language: room.language,
+        output: room.output,
+        running: room.running,
         users: userNames(room),
       });
 
@@ -73,29 +79,69 @@ function initSocket(serverOrIo) {
       });
     });
 
-    // code-change { code }
-    socket.on('code-change', ({ code } = {}) => {
-      const roomId = socket.data.roomId;
-      if (!roomId || typeof code !== 'string') return;
-      getRoom(roomId).code = code;
-      socket.to(roomId).emit('code-change', { code });
+    // code-change { roomId, code }
+    socket.on('code-change', ({ code, roomId } = {}) => {
+      const targetRoom = socket.data.roomId || roomId;
+      if (!targetRoom || typeof code !== 'string') return;
+      if (roomId && !socket.data.roomId) {
+        socket.join(roomId);
+        socket.data.roomId = roomId;
+      }
+      getRoom(targetRoom).code = code;
+      socket.to(targetRoom).emit('code-change', { code });
     });
 
-    // language-change { language }
-    socket.on('language-change', ({ language } = {}) => {
-      const roomId = socket.data.roomId;
-      if (!roomId || !LANGUAGES.includes(language)) return;
-      getRoom(roomId).language = language;
-      socket.to(roomId).emit('language-change', { language });
+    // language-change { roomId, language }
+    socket.on('language-change', ({ language, roomId } = {}) => {
+      const targetRoom = socket.data.roomId || roomId;
+      if (!targetRoom || !LANGUAGES.includes(language)) return;
+      if (roomId && !socket.data.roomId) {
+        socket.join(roomId);
+        socket.data.roomId = roomId;
+      }
+      getRoom(targetRoom).language = language;
+      socket.to(targetRoom).emit('language-change', { language });
     });
 
-    // run-result { output }
-    // The client calls POST /api/execute first, then emits this so the
-    // other person sees the same output.
-    socket.on('run-result', ({ output } = {}) => {
-      const roomId = socket.data.roomId;
-      if (!roomId) return;
-      socket.to(roomId).emit('run-result', { output });
+    // run-start { runId }
+    socket.on('run-start', ({ runId, roomId } = {}) => {
+      const targetRoom = socket.data.roomId || roomId;
+      if (!targetRoom) return;
+      const room = getRoom(targetRoom);
+      room.running = true;
+      room.output = `Running... (started by ${socket.data.username || 'Peer'})`;
+      socket.to(targetRoom).emit('run-start', {
+        runId,
+        by: socket.data.username || 'Peer',
+      });
+    });
+
+    // run-result { runId, output }
+    socket.on('run-result', ({ output, runId, roomId } = {}) => {
+      const targetRoom = socket.data.roomId || roomId;
+      if (!targetRoom) return;
+      const room = getRoom(targetRoom);
+      room.running = false;
+      room.output = output || '';
+      socket.to(targetRoom).emit('run-result', { output: room.output, runId });
+    });
+
+    // run-stop
+    socket.on('run-stop', ({ roomId } = {}) => {
+      const targetRoom = socket.data.roomId || roomId;
+      if (!targetRoom) return;
+      const room = getRoom(targetRoom);
+      room.running = false;
+      room.output = 'Execution stopped.';
+      socket.to(targetRoom).emit('run-stop', { message: 'Execution stopped.' });
+    });
+
+    // output-update { output }
+    socket.on('output-update', ({ output, roomId } = {}) => {
+      const targetRoom = socket.data.roomId || roomId;
+      if (!targetRoom) return;
+      getRoom(targetRoom).output = output || '';
+      socket.to(targetRoom).emit('output-update', { output: output || '' });
     });
 
     socket.on('disconnect', () => {
